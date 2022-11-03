@@ -1,0 +1,16 @@
+{
+  "name": "rs-repotomongo-proto",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "CC0-1.0",
+  "dependencies": {
+    "isomorphic-git": "^1.21.0",
+    "mongodb": "^4.11.0",
+    "xml-js": "^1.6.11"
+  }
+}
