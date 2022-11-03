@@ -180,7 +180,7 @@ async function runworker(){
                 const out = JSON.parse(text);
                 return out;
             default:
-                return text.split("\n");
+                return text.trim().split("\n");
         }
     }
 
