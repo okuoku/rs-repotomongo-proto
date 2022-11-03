@@ -153,7 +153,6 @@ async function runrepo(cfg){
 
 async function runworker(){
     const cfg = workerData;
-    let cnt = 0;
     let col = {};
     try {
         const db = client.db(db_name);
@@ -199,11 +198,6 @@ async function runworker(){
                 await client.close();
                 console.dir(e);
                 process.exit(1);
-            }
-            cnt++;
-            if(cnt > 100){
-                cnt = 0;
-                cache = {};
             }
             parentPort.postMessage({done: obj.path});
             parentPort.postMessage({feedme: true});
