@@ -1,49 +1,79 @@
 const { MongoClient } = require("mongodb");
 const uri = "mongodb://127.0.0.1:27017";
 const client = new MongoClient(uri);
-const isogit = require("isomorphic-git");
 const fs = require("fs");
 const path = require("path");
+const child_process = require("child_process");
 const threads = 16;
 const db_name = "my_mapping";
 const { Worker, parentPort, isMainThread, workerData } = require("node:worker_threads");
 const xml_convert = require("xml-js");
+const EMPTY = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const MAX_BUFFER = 1024*1024*1024*10;
 
 //const commit = "0f8ba2ab0e7867ee121fbbd9bd1da950fe24df3e";
 const gitref = "master";
 
 let total_doc = 0;
 
+async function resolveref(gitdir, refname){
+    // Run git show-ref -s <ref>
+    // Strip result
+    const p = new Promise((res, rej) => {
+        child_process.execFile("git", ["show-ref", "-s", refname],
+                               {cwd: gitdir, maxBuffer: MAX_BUFFER},
+                               (err, stdout, stderr) => {
+                                   if(! err){
+                                       res(stdout.trim());
+                                   }else{
+                                       rej(err);
+                                   }
+                               });
+    });
+    const ret = await p;
+    return ret;
+}
+
+async function difftree(gitdir, from, to){
+    // Run git diff-tree --name-only -r from..to
+    const p = new Promise((res, rej) => {
+        child_process.execFile("git", ["diff-tree", "--name-only", "-r",
+            from + ".." + to], {cwd: gitdir, maxBuffer: MAX_BUFFER}, (err, stdout, stderr) => {
+                if(! err){
+                    res(stdout.trim().split("\n"));
+                }else{
+                    rej(err);
+                }
+            });
+
+    });
+    const ret = await p;
+    return ret;
+}
+
+async function catfile(gitdir, rev, path){
+    // Return false when file was not found
+    const r = rev + ":" + path;
+    const p = new Promise((res, rej) => {
+        child_process.execFile("git", ["cat-file", "-p", rev + ":" + path],
+                               {cwd: gitdir, maxBuffer: MAX_BUFFER}, (err, stdout, stderr) => {
+                                   if(! err){
+                                       res(stdout);
+                                   }else{
+                                       res(false);
+                                   }
+                               });
+    });
+    const ret = await p;
+    return ret;
+}
+
 async function runrepo(cfg){
-    let cache = {};
-    let mapper = async function(pth, ab){
-        // from https://isomorphic-git.org/docs/en/snippets
-        const A = ab[0];
-        const B = ab[1];
-        const Atype = await A?.type();
-        const Btype = await B?.type();
-        if(Atype === "tree" || Btype === "tree"){
-            /* Ignore trees */
-            return;
-        }
-        const Aoid = await A?.oid();
-        const Boid = await B?.oid();
-        if(Aoid != Boid){
-            return pth;
-        }else{
-            return null;
-        }
-    }
 
     let commit = false;
-    commit = await isogit.resolveRef({fs, gitdir: cfg.gitdir,
-                                     cache: cache, ref: gitref});
-
-    let lis = await isogit.walk({fs, 
-                                gitdir: cfg.gitdir,
-                                cache: cache,
-                                trees: [ isogit.TREE({ref: commit}) ],
-                                map: mapper});
+    commit = await resolveref(cfg.gitdir, cfg.branches[0]);
+    console.log("ref", commit);
+    let lis = await difftree(cfg.gitdir, EMPTY, commit);
 
     /* Prefilter list by filenames */
     let filtered = lis.filter(e => {
@@ -123,9 +153,7 @@ async function runrepo(cfg){
 
 async function runworker(){
     const cfg = workerData;
-    const decoder = new TextDecoder();
     let cnt = 0;
-    let cache = {};
     let col = {};
     try {
         const db = client.db(db_name);
@@ -138,21 +166,19 @@ async function runworker(){
 
     async function readdoc(pth){
         const ext = path.extname(pth);
-        let blob = false;
+        let text = false;
         try {
-            blob = await isogit.readBlob({fs, gitdir: cfg.gitdir,
-                                         cache: cache, oid: cfg.commit,
-                                         filepath: pth});
+            text = await catfile(cfg.gitdir, cfg.commit, pth);
         } catch(e) {
             console.dir(e);
             return false;
         }
-        const text = decoder.decode(blob.blob);
         switch(ext){
             case ".xml":
                 return xml_convert.xml2js(text, {compact: true});
             case ".json":
-                return JSON.parse(text);
+                const out = JSON.parse(text);
+                return out;
             default:
                 return text.split("\n");
         }
@@ -166,6 +192,8 @@ async function runworker(){
                 await col.deleteOne({path: obj.path});
                 if(doc){
                     await col.insertOne({path: obj.path, filename: basename, doc: doc});
+                }else{
+                    console.log("deleted", obj.path);
                 }
             } catch(e) {
                 await client.close();
@@ -180,11 +208,11 @@ async function runworker(){
             parentPort.postMessage({done: obj.path});
             parentPort.postMessage({feedme: true});
         }else if(obj.term){
-            console.log("term worker");
+            //console.log("term worker");
             await client.close();
             process.exit(0);
         }else if(obj.run){
-            console.log("run worker");
+            //console.log("run worker");
             parentPort.postMessage({feedme: true});
         }
     });
