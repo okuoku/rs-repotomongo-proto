@@ -4,7 +4,7 @@ const client = new MongoClient(uri);
 const isogit = require("isomorphic-git");
 const fs = require("fs");
 const path = require("path");
-const threads = 10;
+const threads = 16;
 const db_name = "my_mapping";
 const { Worker, parentPort, isMainThread, workerData } = require("node:worker_threads");
 const xml_convert = require("xml-js");
@@ -63,10 +63,10 @@ async function runrepo(cfg){
         const workers = [];
 
         function feed(w){
-            console.log("in feed", filtered.length);
+            console.log("in feed", filtered.length, queue.length);
             if(filtered.length !== 0){
                 const pth = filtered.pop();
-                console.log("Feed", pth);
+                //console.log("Feed", pth);
                 queue.push(pth);
                 w.postMessage({path: pth});
             }else{
@@ -76,7 +76,7 @@ async function runrepo(cfg){
 
         function done(pth){
             queue = queue.filter(e => e != pth);
-            console.log("done", queue);
+            //console.log("done", queue);
             if(queue.length === 0 && filtered.length === 0){
                 workers.forEach(w => {
                     w.postMessage({term: true});
@@ -97,6 +97,7 @@ async function runrepo(cfg){
             mycfg.commit = commit;
             const w = new Worker(__filename, { workerData: mycfg });
             w.on("message", msg => {
+                //console.log("msg",i,msg);
                 if(msg.feedme){
                     feed(w);
                 }else if(msg.done){
@@ -123,6 +124,7 @@ async function runrepo(cfg){
 async function runworker(){
     const cfg = workerData;
     const decoder = new TextDecoder();
+    let cnt = 0;
     let cache = {};
     let col = {};
     try {
@@ -169,6 +171,11 @@ async function runworker(){
                 await client.close();
                 console.dir(e);
                 process.exit(1);
+            }
+            cnt++;
+            if(cnt > 100){
+                cnt = 0;
+                cache = {};
             }
             parentPort.postMessage({done: obj.path});
             parentPort.postMessage({feedme: true});
