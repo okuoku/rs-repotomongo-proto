@@ -220,11 +220,14 @@ async function run(){
         const config = await col.find({ _id: { $exists: true }})
         .toArray();
         console.log(config);
-        await Promise.all(config.map(runrepo));
-        return null;
+        while(config.length != 0){
+            let cfg = config.pop();
+            await runrepo(cfg);
+        }
     } finally {
         await client.close();
     }
+    return null;
 }
 
 if(isMainThread){
