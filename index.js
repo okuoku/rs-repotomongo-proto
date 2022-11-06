@@ -1,6 +1,5 @@
 const { MongoClient } = require("mongodb");
 const uri = "mongodb://127.0.0.1:27017";
-const client = new MongoClient(uri);
 const fs = require("fs");
 const path = require("path");
 const child_process = require("child_process");
@@ -179,6 +178,7 @@ async function runrepo(cfg){
 }
 
 async function runworker(){
+    const client = new MongoClient(uri);
     const cfg = workerData.cfg;
     const ident = workerData.idx;
     const gen = workerData.gen;
@@ -244,6 +244,7 @@ async function runworker(){
 }
 
 async function run(){
+    const client = new MongoClient(uri);
     try {
         const db = client.db(db_name);
         const col = db.collection("config");
