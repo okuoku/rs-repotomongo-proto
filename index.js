@@ -68,12 +68,40 @@ async function catfile(gitdir, rev, path){
     return ret;
 }
 
+function get_sync_status(cfg, branch){
+    if(! cfg.sync_status){
+        cfg["sync_status"] = {__gen: 0};
+    }
+    if(! cfg.sync_status[branch]){
+        cfg["sync_status"][branch] = {
+            gen: cfg.sync_status.__gen,
+            rev: EMPTY
+        };
+    }
+    return cfg.sync_status[branch];
+}
+
 async function runrepo(cfg){
+    let gen = 0;
 
     let commit = false;
     commit = await resolveref(cfg.gitdir, cfg.branches[0]);
     console.log("ref", commit);
-    let lis = await difftree(cfg.gitdir, EMPTY, commit);
+    const sync_status = get_sync_status(cfg, cfg.branches[0]);
+    let last_commit = sync_status.rev;
+
+    if(last_commit == commit){
+        console.log("No update");
+        return;
+    }
+
+    cfg.sync_status.__gen++;
+    sync_status.gen = cfg.sync_status.__gen;
+    gen = sync_status.gen;
+    sync_status.rev = commit;
+
+
+    let lis = await difftree(cfg.gitdir, last_commit, commit);
 
     /* Prefilter list by filenames */
     let filtered = lis.filter(e => {
@@ -87,7 +115,6 @@ async function runrepo(cfg){
     let queue = [];
 
     total_doc = filtered.length;
-
 
     await new Promise((res, rej) => {
         const workers = [];
@@ -125,7 +152,7 @@ async function runrepo(cfg){
         for(let i=0;i!=threads;i++){
             const mycfg = cfg;
             mycfg.commit = commit;
-            const w = new Worker(__filename, { workerData: mycfg });
+            const w = new Worker(__filename, { workerData: {cfg: mycfg, idx: i, gen: gen}});
             w.on("message", msg => {
                 //console.log("msg",i,msg);
                 if(msg.feedme){
@@ -152,7 +179,9 @@ async function runrepo(cfg){
 }
 
 async function runworker(){
-    const cfg = workerData;
+    const cfg = workerData.cfg;
+    const ident = workerData.idx;
+    const gen = workerData.gen;
     let col = {};
     try {
         const db = client.db(db_name);
@@ -190,7 +219,9 @@ async function runworker(){
                 const doc = await readdoc(obj.path);
                 await col.deleteOne({path: obj.path});
                 if(doc){
-                    await col.insertOne({path: obj.path, filename: basename, doc: doc});
+                    console.log("INS",ident);
+                    await col.insertOne({path: obj.path, filename: basename, gen: gen, doc: doc});
+                    console.log("INSDONE",ident);
                 }else{
                     console.log("deleted", obj.path);
                 }
@@ -223,6 +254,7 @@ async function run(){
         while(config.length != 0){
             let cfg = config.pop();
             await runrepo(cfg);
+            await col.replaceOne({_id: cfg._id}, cfg);
         }
     } finally {
         await client.close();
