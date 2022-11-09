@@ -108,7 +108,7 @@ async function runrepo(cfg){
             return false;
         }
         const basename = path.basename(e);
-        const idx = cfg.files.findIndex(n => n == basename);
+        const idx = cfg.files.findIndex(n => basename.endsWith(n));
         return idx >= 0;
     });
     let queue = [];
